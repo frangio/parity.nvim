@@ -1,5 +1,13 @@
 local ns = vim.api.nvim_create_namespace("parity")
 
+local function current_pos()
+  local buf = vim.api.nvim_get_current_buf()
+  local cursor = vim.api.nvim_win_get_cursor(0)
+  local row = cursor[1] - 1
+  local col = cursor[2]
+  return buf, row, col
+end
+
 local function materialize_extmarks(buf)
   local marks = vim.api.nvim_buf_get_extmarks(
     buf,
@@ -65,10 +73,7 @@ local function add_space_to_close(buf, row, col, closing)
 end
 
 local function insert_open_paren()
-  local buf = vim.api.nvim_get_current_buf()
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local row = cursor[1] - 1
-  local col = cursor[2]
+  local buf, row, col = current_pos()
 
   vim.api.nvim_buf_set_extmark(buf, ns, row, col, {
     virt_text = { { ")", "DiffAdd" } },
@@ -80,10 +85,7 @@ local function insert_open_paren()
 end
 
 local function insert_close_paren()
-  local buf = vim.api.nvim_get_current_buf()
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local row = cursor[1] - 1
-  local col = cursor[2]
+  local buf, row, col = current_pos()
 
   cancel_matching_close(buf, row, col, ")")
 
@@ -91,10 +93,7 @@ local function insert_close_paren()
 end
 
 local function insert_space()
-  local buf = vim.api.nvim_get_current_buf()
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local row = cursor[1] - 1
-  local col = cursor[2]
+  local buf, row, col = current_pos()
 
   add_space_to_close(buf, row, col, ")")
 
@@ -102,10 +101,7 @@ local function insert_space()
 end
 
 local function insert_backspace()
-  local buf = vim.api.nvim_get_current_buf()
-  local cursor = vim.api.nvim_win_get_cursor(0)
-  local row = cursor[1] - 1
-  local col = cursor[2]
+  local buf, row, col = current_pos()
   local keys = "<BS>"
 
   if col > 0 then
