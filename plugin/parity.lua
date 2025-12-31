@@ -96,6 +96,16 @@ vim.keymap.set('i', '<Space>', function()
   return ' '
 end, { expr = true })
 
+vim.keymap.set('i', '<Del>', function()
+  vim.schedule(draw_float)
+  local buf, row, col = current_pos()
+  local mark_right = get_mark_right(buf, row, col)
+  if mark_right then
+    vim.api.nvim_buf_del_extmark(buf, ns, mark_right)
+  end
+  return '<Del>'
+end, { expr = true })
+
 vim.keymap.set('i', '<BS>', function()
   vim.schedule(draw_float)
   local buf, row, col = current_pos()
