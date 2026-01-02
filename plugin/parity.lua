@@ -1,42 +1,76 @@
 local ns = vim.api.nvim_create_namespace("parity")
 local next_id = 1
 
+local TAG_NAMES = { "OPEN", "CLOSE", "EXIT", "SPACE_L", "SPACE_R" }
+local TAG_BITS = math.ceil(math.log(#TAG_NAMES, 2))
+local TAG_MASK = bit.lshift(1, TAG_BITS) - 1
+local TAG = {}
+for i, name in ipairs(TAG_NAMES) do
+  TAG[name] = i - 1
+end
+
+local function alloc_id()
+  local base = bit.lshift(next_id, TAG_BITS)
+  next_id = next_id + 1
+  return base
+end
+
 local function current_pos()
-  local buf = vim.api.nvim_get_current_buf()
   local cursor = vim.api.nvim_win_get_cursor(0)
   local row = cursor[1] - 1
   local col = cursor[2]
-  return buf, row, col
+  return row, col
 end
 
-local function get_mark_kind(id)
-  if not id then return nil end
-  return id % 2 == 1 and "open" or "close"
+local function get_mark(base, tag)
+  local pos = vim.api.nvim_buf_get_extmark_by_id(0, ns, base + tag, {})
+  return pos[1], pos[2]
 end
 
-local function get_mark_left(buf, row, col)
-  local marks = vim.api.nvim_buf_get_extmarks(buf, ns, { row, col - 1 }, { row, col - 1 }, { limit = 1 })
-  return marks[1] and marks[1][1]
+local function get_mark_left(row, col)
+  local marks = vim.api.nvim_buf_get_extmarks(
+    0, ns, { row, col }, { row, col }, { limit = 2 }
+  )
+  for _, m in ipairs(marks) do
+    local id = m[1]
+    local tag = bit.band(id, TAG_MASK)
+    if tag == TAG.OPEN or tag == TAG.EXIT or tag == TAG.SPACE_L then
+      return id - tag, tag
+    end
+  end
 end
 
-local function get_mark_right(buf, row, col)
-  local marks = vim.api.nvim_buf_get_extmarks(buf, ns, { row, col }, { row, col }, { limit = 1 })
-  return marks[1] and marks[1][1]
+local function get_mark_right(row, col)
+  local marks = vim.api.nvim_buf_get_extmarks(
+    0, ns, { row, col }, { row, col }, { limit = 2 }
+  )
+  for _, m in ipairs(marks) do
+    local id = m[1]
+    local tag = bit.band(id, TAG_MASK)
+    if tag == TAG.CLOSE or tag == TAG.SPACE_R then
+      return id - tag, tag
+    end
+  end
 end
 
 local float_buf = vim.api.nvim_create_buf(false, true)
 local float_win = nil
 
 local function draw_float()
-  local function mark_char(kind)
-    if not kind then return "." end
-    return kind == "open" and "-" or "+"
+  local function mark_char(tag)
+    if not tag then return "." end
+    if tag == TAG.OPEN then return "(" end
+    if tag == TAG.CLOSE then return ")" end
+    if tag == TAG.EXIT then return "X" end
+    if tag == TAG.SPACE_L then return "<" end
+    if tag == TAG.SPACE_R then return ">" end
+    return "?"
   end
 
-  local buf, row, col = current_pos()
-  local lhs = get_mark_left(buf, row, col)
-  local rhs = get_mark_right(buf, row, col)
-  local text = mark_char(get_mark_kind(lhs)) .. "|" .. mark_char(get_mark_kind(rhs))
+  local row, col = current_pos()
+  local _, lhs_tag = get_mark_left(row, col)
+  local _, rhs_tag = get_mark_right(row, col)
+  local text = mark_char(lhs_tag) .. "|" .. mark_char(rhs_tag)
   vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
   local win_opts = {
     relative = "editor",
@@ -53,72 +87,192 @@ local function draw_float()
   end
 end
 
-vim.keymap.set('i', '<Plug>(parity-mark-open)', function()
-  local buf, row, col = current_pos()
-  if next_id % 2 == 0 then next_id = next_id + 1 end
-  vim.api.nvim_buf_set_extmark(buf, ns, row, col - 1, {
-    id = next_id,
-    end_col = col,
-    hl_group = "DiffChange",
+function parity_mark_pair()
+  local row, col = current_pos()
+  local base = alloc_id()
+  -- OPEN: left gravity, sticks to opening paren
+  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
+    id = base + TAG.OPEN,
+    right_gravity = false,
   })
-  next_id = next_id + 1
-  draw_float()
-end)
-
-vim.keymap.set('i', '<Plug>(parity-mark-close)', function()
-  local buf, row, col = current_pos()
-  vim.api.nvim_buf_set_extmark(buf, ns, row, col - 1, {
-    id = next_id,
-    end_col = col,
-    hl_group = "DiffChange",
+  -- CLOSE: right gravity, sticks to closing paren (inside)
+  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
+    id = base + TAG.CLOSE,
+    right_gravity = true,
   })
-  next_id = next_id + 1
-  draw_float()
-end)
+  -- EXIT: left gravity, after closing paren (exit point)
+  vim.api.nvim_buf_set_extmark(0, ns, row, col + 1, {
+    id = base + TAG.EXIT,
+    right_gravity = false,
+  })
+  vim.schedule(draw_float)
+end
 
-vim.keymap.set('i', '(', '(<Plug>(parity-mark-open))<Plug>(parity-mark-close)<C-g>U<Left>')
+vim.keymap.set('i', '(', '()<C-g>U<Left><Cmd>lua parity_mark_pair()<CR>')
 
 vim.keymap.set('i', ')', function()
-  local buf, row, col = current_pos()
-  if get_mark_right(buf, row, col) then
-    return '<C-g>U<Right>'
+  local row, col = current_pos()
+  local base, tag = get_mark_right(row, col)
+  if base and (tag == TAG.CLOSE or tag == TAG.SPACE_R) then
+    local exit_row, exit_col = get_mark(base, TAG.EXIT)
+    if exit_row ~= row then
+      if col == vim.fn.indent(row + 1) then
+        return '<Del>' .. string.rep('<Right>', exit_col) .. '<C-F>'
+      else
+        return '<Del><CR>' .. string.rep('<Right>', exit_col)
+      end
+    else
+      local distance = exit_col - col
+      return string.rep('<C-g>U<Right>', distance)
+    end
   end
   return ')'
 end, { expr = true })
 
+function parity_insert_cr(indent_size)
+  local row, col = current_pos()
+  indent_size = indent_size or vim.fn.indent(row + 1)
+  local indent = string.rep(" ", indent_size)
+  vim.api.nvim_buf_set_text(0, row, col, row, col, { "", indent })
+end
+
+function parity_reposition_mark(base)
+  local row, col = current_pos()
+  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
+    id = base + TAG.OPEN,
+    right_gravity = false,
+  })
+  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
+    id = base + TAG.CLOSE,
+    right_gravity = true,
+  })
+end
+
+function parity_mark_space(base)
+  local row, col = current_pos()
+  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
+    id = base + TAG.SPACE_L,
+    right_gravity = false,
+  })
+  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
+    id = base + TAG.SPACE_R,
+    right_gravity = true,
+  })
+end
+
+function parity_mark_space_r(base)
+  local row, col = current_pos()
+  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
+    id = base + TAG.SPACE_R,
+    right_gravity = true,
+  })
+end
+
+function parity_adjust_space_l(base)
+  local row, col = current_pos()
+  local space_l_row, space_l_col = get_mark(base, TAG.SPACE_L)
+  if space_l_row == row and space_l_col == 0 then
+    vim.api.nvim_buf_set_extmark(0, ns, row, vim.fn.indent(row + 1), {
+      id = base + TAG.SPACE_L,
+      right_gravity = false,
+    })
+  end
+end
+
+vim.keymap.set('i', '<CR>', function()
+  vim.schedule(draw_float)
+  local row, col = current_pos()
+  local base, tag = get_mark_left(row, col)
+  if base and tag == TAG.OPEN then
+    local close_row, close_col = get_mark(base, TAG.CLOSE)
+    if close_row == row and close_col == col then
+      return string.format('<Cmd>lua parity_insert_cr()<CR><CR><Cmd>lua parity_mark_space(%d)<CR>', base)
+    end
+  end
+  return '<CR>'
+end, { expr = true })
+
 vim.keymap.set('i', '<Space>', function()
-  local buf, row, col = current_pos()
-  local mark_left = get_mark_left(buf, row, col)
-  local mark_right = get_mark_right(buf, row, col)
-  if mark_left and mark_right == mark_left + 1 then
-    return ' <Plug>(parity-mark-open) <Plug>(parity-mark-close)<C-g>U<Left>'
+  vim.schedule(draw_float)
+  local row, col = current_pos()
+  local base, tag = get_mark_left(row, col)
+  if base and tag == TAG.OPEN then
+    local close_row, close_col = get_mark(base, TAG.CLOSE)
+    if close_row == row and close_col == col then
+      return string.format('  <C-g>U<Left><Cmd>lua parity_mark_space(%d)<CR>', base)
+    end
   end
   return ' '
 end, { expr = true })
 
 vim.keymap.set('i', '<Del>', function()
   vim.schedule(draw_float)
-  local buf, row, col = current_pos()
-  local mark_right = get_mark_right(buf, row, col)
-  if mark_right then
-    vim.api.nvim_buf_del_extmark(buf, ns, mark_right)
+  local row, col = current_pos()
+  local base = get_mark_right(row, col)
+  if base then
+    vim.api.nvim_buf_del_extmark(0, ns, base + TAG.CLOSE)
   end
   return '<Del>'
 end, { expr = true })
 
 vim.keymap.set('i', '<BS>', function()
   vim.schedule(draw_float)
-  local buf, row, col = current_pos()
-  local mark_left = get_mark_left(buf, row, col)
-  if mark_left then
-    if get_mark_kind(mark_left) == "close" then
-      return '<C-g>U<Left>'
-    else
-      vim.api.nvim_buf_del_extmark(buf, ns, mark_left)
-      local mark_right = get_mark_right(buf, row, col)
-      if mark_right == mark_left + 1 then
-        vim.api.nvim_buf_del_extmark(buf, ns, mark_right)
-        return '<Del><BS>'
+  local row, col = current_pos()
+  local base, tag = get_mark_left(row, col)
+  if base then
+    if tag == TAG.EXIT then
+      -- at exit mark: move left into the parens (or spaces if present)
+      local open_row, open_col = get_mark(base, TAG.OPEN)
+      local space_r_row, space_r_col = get_mark(base, TAG.SPACE_R)
+      if space_r_row and open_row ~= space_r_row then
+        if space_r_row == row then
+          local distance = col - space_r_col
+          return string.rep('<C-g>U<Left>', distance)
+            .. '<Cmd>lua parity_insert_cr()<CR><C-F>'
+            .. string.format('<Cmd>lua parity_adjust_space_l(%d)<CR>', base)
+            .. string.format('<Cmd>lua parity_mark_space_r(%d)<CR>', base)
+        else
+          local indent_size = vim.fn.indent(row + 1)
+          return '<C-g>U<Left>0<C-D><BS><C-F>'
+            .. string.format('<Cmd>lua parity_adjust_space_l(%d)<CR>', base)
+            .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
+            .. string.format('<Cmd>lua parity_mark_space_r(%d)<CR>', base)
+        end
+      end
+      local close_row, close_col = get_mark(base, TAG.CLOSE)
+      local target_col = space_r_row and space_r_col or close_col
+      local distance = (close_row ~= row) and 1 or (col - target_col)
+      return string.rep('<C-g>U<Left>', distance)
+    elseif tag == TAG.SPACE_L then
+      local space_r_row, space_r_col = get_mark(base, TAG.SPACE_R)
+      if space_r_row == row and space_r_col == col then
+        -- delete matched spaces and marks
+        local open_row, open_col = get_mark(base, TAG.OPEN)
+        local close_row, close_col = get_mark(base, TAG.CLOSE)
+        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.SPACE_L)
+        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.SPACE_R)
+        local result = ''
+        if close_row ~= row then
+          result = '<Del>'
+        else
+          result = string.rep('<Del>', close_col - col)
+        end
+        if open_row ~= row then
+          result = result .. '0<C-D><BS>'
+        else
+          result = result .. string.rep('<BS>', col - open_col)
+        end
+        return result
+      end
+    elseif tag == TAG.OPEN then
+      local close_row, close_col = get_mark(base, TAG.CLOSE)
+      if close_row == row and close_col == col then
+        -- open and close marks together: cursor is between matching delimiters
+        -- delete both delimiters and marks
+        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.OPEN)
+        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.CLOSE)
+        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.EXIT)
+        return '<BS><Del>'
       end
     end
   end
@@ -140,8 +294,7 @@ vim.api.nvim_create_autocmd("InsertLeave", {
 
 vim.api.nvim_create_autocmd("InsertLeave", {
   callback = function()
-    local buf = vim.api.nvim_get_current_buf()
-    vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+    vim.api.nvim_buf_clear_namespace(0, ns, 0, -1)
     next_id = 1
   end,
 })
