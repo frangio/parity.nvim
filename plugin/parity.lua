@@ -9,6 +9,8 @@ for i, name in ipairs(TAG_NAMES) do
   TAG[name] = i - 1
 end
 
+local DELIMITERS = { {"(", ")"}, {"[", "]"}, {"{", "}"} }
+
 local function alloc_id()
   local base = bit.lshift(next_id, TAG_BITS)
   next_id = next_id + 1
@@ -108,26 +110,27 @@ function parity_mark_pair()
   vim.schedule(draw_float)
 end
 
-vim.keymap.set('i', '(', '()<C-g>U<Left><Cmd>lua parity_mark_pair()<CR>')
-
-vim.keymap.set('i', ')', function()
-  local row, col = current_pos()
-  local base, tag = get_mark_right(row, col)
-  if base and (tag == TAG.CLOSE or tag == TAG.SPACE_R) then
-    local exit_row, exit_col = get_mark(base, TAG.EXIT)
-    if exit_row ~= row then
-      if col == vim.fn.indent(row + 1) then
-        return '<Del>' .. string.rep('<Right>', exit_col) .. '<C-F>'
+for open, close in pairs(DELIMITERS) do
+  vim.keymap.set('i', open, open .. close .. '<C-g>U<Left><Cmd>lua parity_mark_pair()<CR>')
+  vim.keymap.set('i', close, function()
+    local row, col = current_pos()
+    local base, tag = get_mark_right(row, col)
+    if base and (tag == TAG.CLOSE or tag == TAG.SPACE_R) then
+      local exit_row, exit_col = get_mark(base, TAG.EXIT)
+      if exit_row ~= row then
+        if col == vim.fn.indent(row + 1) then
+          return '<Del>' .. string.rep('<Right>', exit_col) .. '<C-F>'
+        else
+          return '<Del><CR>' .. string.rep('<Right>', exit_col)
+        end
       else
-        return '<Del><CR>' .. string.rep('<Right>', exit_col)
+        local distance = exit_col - col
+        return string.rep('<C-g>U<Right>', distance)
       end
-    else
-      local distance = exit_col - col
-      return string.rep('<C-g>U<Right>', distance)
     end
-  end
-  return ')'
-end, { expr = true })
+    return close
+  end, { expr = true })
+end
 
 function parity_insert_cr(indent_size)
   local row, col = current_pos()
