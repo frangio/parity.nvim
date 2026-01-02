@@ -90,40 +90,40 @@ local float_buf = nil
 local float_win = nil
 
 local function draw_float()
-   if DEBUG then
-     vim.schedule(function()
-       float_buf = float_buf or vim.api.nvim_create_buf(false, true)
+  if DEBUG then
+    vim.schedule(function()
+      float_buf = float_buf or vim.api.nvim_create_buf(false, true)
 
-       local function mark_char(tag)
-         if not tag then return "." end
-         if tag == TAG.OPEN then return "(" end
-         if tag == TAG.CLOSE then return ")" end
-         if tag == TAG.EXIT then return "X" end
-         if tag == TAG.SPACE then return ">" end
-         return "?"
-       end
+      local function mark_char(tag)
+        if not tag then return "." end
+        if tag == TAG.OPEN then return "(" end
+        if tag == TAG.CLOSE then return ")" end
+        if tag == TAG.EXIT then return "X" end
+        if tag == TAG.SPACE then return ">" end
+        return "?"
+      end
 
-       local row, col = current_pos()
-       local _, lhs_tag = get_mark_left(row, col)
-       local _, rhs_tag = get_mark_right(row, col)
-       local text = mark_char(lhs_tag) .. "|" .. mark_char(rhs_tag)
-       vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
-       local win_opts = {
-         relative = "editor",
-         row = 0,
-         col = vim.o.columns - #text,
-         width = #text,
-         height = 1,
-         style = "minimal",
-       }
-       if float_win and vim.api.nvim_win_is_valid(float_win) then
-         vim.api.nvim_win_set_config(float_win, win_opts)
-       else
-         float_win = vim.api.nvim_open_win(float_buf, false, win_opts)
-       end
-     end)
-   end
- end
+      local row, col = current_pos()
+      local _, lhs_tag = get_mark_left(row, col)
+      local _, rhs_tag = get_mark_right(row, col)
+      local text = mark_char(lhs_tag) .. "|" .. mark_char(rhs_tag)
+      vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
+      local win_opts = {
+        relative = "editor",
+        row = 0,
+        col = vim.o.columns - #text,
+        width = #text,
+        height = 1,
+        style = "minimal",
+      }
+      if float_win and vim.api.nvim_win_is_valid(float_win) then
+        vim.api.nvim_win_set_config(float_win, win_opts)
+      else
+        float_win = vim.api.nvim_open_win(float_buf, false, win_opts)
+      end
+    end)
+  end
+end
 
 function parity_mark_pair()
   local row, col = current_pos()
@@ -190,34 +190,34 @@ function parity_mark_space(base)
 end
 
 vim.keymap.set('i', '<CR>', function()
-   draw_float()
-    local row, col = current_pos()
-   local base, tag = get_mark_left(row, col)
-   if base and tag == TAG.OPEN then
-     local close_row, close_col = get_mark(base, TAG.CLOSE)
-     if close_row == row and close_col == col then
-       return string.format('<Cmd>lua parity_insert_cr()<CR><CR><Cmd>lua parity_mark_space(%d)<CR>', base)
-     end
-   end
-   return '<CR>'
+  draw_float()
+  local row, col = current_pos()
+  local base, tag = get_mark_left(row, col)
+  if base and tag == TAG.OPEN then
+    local close_row, close_col = get_mark(base, TAG.CLOSE)
+    if close_row == row and close_col == col then
+      return string.format('<Cmd>lua parity_insert_cr()<CR><CR><Cmd>lua parity_mark_space(%d)<CR>', base)
+    end
+  end
+  return '<CR>'
 end, { expr = true })
 
 vim.keymap.set('i', '<Space>', function()
-    draw_float()
-    local row, col = current_pos()
-   local base, tag = get_mark_left(row, col)
-   if base and tag == TAG.OPEN then
-     local close_row, close_col = get_mark(base, TAG.CLOSE)
-     if close_row == row and close_col == col then
-       return string.format('  <C-g>U<Left><Cmd>lua parity_mark_space(%d)<CR>', base)
-     end
-   end
-   return ' '
+  draw_float()
+  local row, col = current_pos()
+  local base, tag = get_mark_left(row, col)
+  if base and tag == TAG.OPEN then
+    local close_row, close_col = get_mark(base, TAG.CLOSE)
+    if close_row == row and close_col == col then
+      return string.format('  <C-g>U<Left><Cmd>lua parity_mark_space(%d)<CR>', base)
+    end
+  end
+  return ' '
 end, { expr = true })
 
 vim.keymap.set('i', '<Del>', function()
-   draw_float()
-   local row, col = current_pos()
+  draw_float()
+  local row, col = current_pos()
   local base = get_mark_right(row, col)
   if base then
     vim.api.nvim_buf_del_extmark(0, ns, base + TAG.CLOSE)
@@ -226,8 +226,8 @@ vim.keymap.set('i', '<Del>', function()
 end, { expr = true })
 
 vim.keymap.set('i', '<BS>', function()
-   draw_float()
-   local row, col = current_pos()
+  draw_float()
+  local row, col = current_pos()
   local base, tag = get_mark_left(row, col)
   if base then
     if tag == TAG.EXIT then
@@ -239,13 +239,13 @@ vim.keymap.set('i', '<BS>', function()
         if space_row == row then
           local distance = col - space_col
           return string.rep('<C-g>U<Left>', distance)
-            .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
-            .. '<C-F>'
-            .. string.format('<Cmd>lua parity_mark_space(%d)<CR>', base)
+          .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
+          .. '<C-F>'
+          .. string.format('<Cmd>lua parity_mark_space(%d)<CR>', base)
         else
           return '<C-g>U<Left>0<C-D><BS><C-F>'
-            .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
-            .. string.format('<Cmd>lua parity_mark_space(%d)<CR>', base)
+          .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
+          .. string.format('<Cmd>lua parity_mark_space(%d)<CR>', base)
         end
       end
       local close_row, close_col = get_mark(base, TAG.CLOSE)
@@ -253,29 +253,29 @@ vim.keymap.set('i', '<BS>', function()
       local distance = (close_row ~= row) and 1 or (col - target_col)
       return string.rep('<C-g>U<Left>', distance)
     elseif tag == TAG.SPACE then
-       local open_row, open_col = get_mark(base, TAG.OPEN)
-       if open_row == row - 1 and col == compute_indent(row) then
-         -- delete matched spaces and marks
-         local close_row, close_col = get_mark(base, TAG.CLOSE)
-         vim.api.nvim_buf_del_extmark(0, ns, base + TAG.SPACE)
-         local result = ''
-         if close_row ~= row then
-           result = '<Del>'
-         else
-           result = string.rep('<Del>', close_col - col)
-         end
-         result = result .. '0<C-D><BS>'
-         return result
-       elseif open_row == row and col - open_col <= 1 then
-         -- open and space on same row with minimal distance: delete open paren and spaces, and close paren if on same row
-         local close_row, close_col = get_mark(base, TAG.CLOSE)
-         vim.api.nvim_buf_del_extmark(0, ns, base + TAG.SPACE)
-         local result = string.rep('<BS>', col - open_col)
-         if close_row == row then
-           result = result .. string.rep('<Del>', close_col - col)
-         end
-         return result
-       end
+      local open_row, open_col = get_mark(base, TAG.OPEN)
+      if open_row == row - 1 and col == compute_indent(row) then
+        -- delete matched spaces and marks
+        local close_row, close_col = get_mark(base, TAG.CLOSE)
+        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.SPACE)
+        local result = ''
+        if close_row ~= row then
+          result = '<Del>'
+        else
+          result = string.rep('<Del>', close_col - col)
+        end
+        result = result .. '0<C-D><BS>'
+        return result
+      elseif open_row == row and col - open_col <= 1 then
+        -- open and space on same row with minimal distance: delete open paren and spaces, and close paren if on same row
+        local close_row, close_col = get_mark(base, TAG.CLOSE)
+        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.SPACE)
+        local result = string.rep('<BS>', col - open_col)
+        if close_row == row then
+          result = result .. string.rep('<Del>', close_col - col)
+        end
+        return result
+      end
     elseif tag == TAG.OPEN then
       local close_row, close_col = get_mark(base, TAG.CLOSE)
       if close_row == row and close_col == col then
