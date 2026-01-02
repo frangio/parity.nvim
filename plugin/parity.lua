@@ -181,18 +181,6 @@ function parity_insert_cr(indent_size)
   vim.api.nvim_buf_set_text(0, row, col, row, col, { "", indent })
 end
 
-function parity_reposition_mark(base)
-  local row, col = current_pos()
-  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
-    id = base + TAG.OPEN,
-    right_gravity = false,
-  })
-  vim.api.nvim_buf_set_extmark(0, ns, row, col, {
-    id = base + TAG.CLOSE,
-    right_gravity = true,
-  })
-end
-
 function parity_mark_space(base)
   local row, col = current_pos()
   vim.api.nvim_buf_set_extmark(0, ns, row, col, {
