@@ -13,6 +13,14 @@ local TAG_MASK = 0b11
 
 local DELIMITERS = { "()", "[]", "{}" }
 
+local function reindent(keys)
+  if vim.bo.indentexpr ~= '' or vim.bo.cindent then
+    return keys .. '<C-F>'
+  else
+    return keys
+  end
+end
+
 local function alloc_id()
   local base = bit.lshift(next_id, TAG_BITS)
   next_id = next_id + 1
@@ -157,7 +165,7 @@ for _, pair in ipairs(DELIMITERS) do
       local exit_row, exit_col = get_mark(base, TAG.EXIT)
       if exit_row ~= row then
         if col == vim.fn.indent(row + 1) then
-          return '<Del>' .. string.rep('<Right>', exit_col) .. '<C-F>'
+          return reindent('<Del>' .. string.rep('<Right>', exit_col))
         else
           return '<Del><CR>' .. string.rep('<Right>', exit_col)
         end
@@ -240,12 +248,11 @@ vim.keymap.set('i', '<BS>', function()
         local indent_size = vim.fn.indent(row + 1)
         if space_row == row then
           local distance = col - space_col
-          return string.rep('<C-g>U<Left>', distance)
-          .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
-          .. '<C-F>'
+          return reindent(string.rep('<C-g>U<Left>', distance)
+          .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size))
           .. string.format('<Cmd>lua parity_mark_space(%d)<CR>', base)
         else
-          return '<C-g>U<Left>0<C-D><BS><C-F>'
+          return reindent('<C-g>U<Left>0<C-D><BS>')
           .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
           .. string.format('<Cmd>lua parity_mark_space(%d)<CR>', base)
         end
@@ -291,7 +298,7 @@ vim.keymap.set('i', '<BS>', function()
     end
   end
   if col == compute_indent(row) then
-    return '0<C-D><BS><C-F>'
+    return reindent('0<C-D><BS>')
   end
   return '<BS>'
 end, { expr = true })
