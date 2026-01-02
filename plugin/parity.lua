@@ -1,5 +1,6 @@
 local ns = vim.api.nvim_create_namespace("parity")
 local next_id = 1
+local DEBUG = false
 
 local TAG_NAMES = { "OPEN", "CLOSE", "EXIT", "SPACE_L", "SPACE_R" }
 local TAG_BITS = math.ceil(math.log(#TAG_NAMES, 2))
@@ -55,39 +56,45 @@ local function get_mark_right(row, col)
   end
 end
 
-local float_buf = vim.api.nvim_create_buf(false, true)
+local float_buf = nil
 local float_win = nil
 
 local function draw_float()
-  local function mark_char(tag)
-    if not tag then return "." end
-    if tag == TAG.OPEN then return "(" end
-    if tag == TAG.CLOSE then return ")" end
-    if tag == TAG.EXIT then return "X" end
-    if tag == TAG.SPACE_L then return "<" end
-    if tag == TAG.SPACE_R then return ">" end
-    return "?"
-  end
+   if DEBUG then
+     vim.schedule(function()
+       float_buf = float_buf or vim.api.nvim_create_buf(false, true)
 
-  local row, col = current_pos()
-  local _, lhs_tag = get_mark_left(row, col)
-  local _, rhs_tag = get_mark_right(row, col)
-  local text = mark_char(lhs_tag) .. "|" .. mark_char(rhs_tag)
-  vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
-  local win_opts = {
-    relative = "editor",
-    row = 0,
-    col = vim.o.columns - #text,
-    width = #text,
-    height = 1,
-    style = "minimal",
-  }
-  if float_win and vim.api.nvim_win_is_valid(float_win) then
-    vim.api.nvim_win_set_config(float_win, win_opts)
-  else
-    float_win = vim.api.nvim_open_win(float_buf, false, win_opts)
-  end
-end
+       local function mark_char(tag)
+         if not tag then return "." end
+         if tag == TAG.OPEN then return "(" end
+         if tag == TAG.CLOSE then return ")" end
+         if tag == TAG.EXIT then return "X" end
+         if tag == TAG.SPACE_L then return "<" end
+         if tag == TAG.SPACE_R then return ">" end
+         return "?"
+       end
+
+       local row, col = current_pos()
+       local _, lhs_tag = get_mark_left(row, col)
+       local _, rhs_tag = get_mark_right(row, col)
+       local text = mark_char(lhs_tag) .. "|" .. mark_char(rhs_tag)
+       vim.api.nvim_buf_set_lines(float_buf, 0, -1, false, { text })
+       local win_opts = {
+         relative = "editor",
+         row = 0,
+         col = vim.o.columns - #text,
+         width = #text,
+         height = 1,
+         style = "minimal",
+       }
+       if float_win and vim.api.nvim_win_is_valid(float_win) then
+         vim.api.nvim_win_set_config(float_win, win_opts)
+       else
+         float_win = vim.api.nvim_open_win(float_buf, false, win_opts)
+       end
+     end)
+   end
+ end
 
 function parity_mark_pair()
   local row, col = current_pos()
@@ -107,7 +114,7 @@ function parity_mark_pair()
     id = base + TAG.EXIT,
     right_gravity = false,
   })
-  vim.schedule(draw_float)
+  draw_float()
 end
 
 for open, close in pairs(DELIMITERS) do
@@ -187,8 +194,8 @@ function parity_adjust_space_l()
 end
 
 vim.keymap.set('i', '<CR>', function()
-  vim.schedule(draw_float)
-  local row, col = current_pos()
+   draw_float()
+   local row, col = current_pos()
   local base, tag = get_mark_left(row, col)
   if base and tag == TAG.OPEN then
     local close_row, close_col = get_mark(base, TAG.CLOSE)
@@ -200,8 +207,8 @@ vim.keymap.set('i', '<CR>', function()
 end, { expr = true })
 
 vim.keymap.set('i', '<Space>', function()
-  vim.schedule(draw_float)
-  local row, col = current_pos()
+   draw_float()
+   local row, col = current_pos()
   local base, tag = get_mark_left(row, col)
   if base and tag == TAG.OPEN then
     local close_row, close_col = get_mark(base, TAG.CLOSE)
@@ -213,8 +220,8 @@ vim.keymap.set('i', '<Space>', function()
 end, { expr = true })
 
 vim.keymap.set('i', '<Del>', function()
-  vim.schedule(draw_float)
-  local row, col = current_pos()
+   draw_float()
+   local row, col = current_pos()
   local base = get_mark_right(row, col)
   if base then
     vim.api.nvim_buf_del_extmark(0, ns, base + TAG.CLOSE)
@@ -223,8 +230,8 @@ vim.keymap.set('i', '<Del>', function()
 end, { expr = true })
 
 vim.keymap.set('i', '<BS>', function()
-  vim.schedule(draw_float)
-  local row, col = current_pos()
+   draw_float()
+   local row, col = current_pos()
   local base, tag = get_mark_left(row, col)
   if base then
     if tag == TAG.EXIT then
@@ -303,16 +310,24 @@ vim.api.nvim_create_autocmd("InsertEnter", {
 
 vim.api.nvim_create_autocmd("InsertLeave", {
   callback = function()
-    if float_win and vim.api.nvim_win_is_valid(float_win) then
-      vim.api.nvim_win_hide(float_win)
-      float_win = nil
-    end
-  end,
-})
-
-vim.api.nvim_create_autocmd("InsertLeave", {
-  callback = function()
     vim.api.nvim_buf_clear_namespace(0, ns, 0, -1)
     next_id = 1
   end,
 })
+
+if DEBUG then
+  vim.api.nvim_create_autocmd("CursorMovedI", {
+    callback = function()
+      draw_float()
+    end,
+  })
+
+  vim.api.nvim_create_autocmd("InsertLeave", {
+    callback = function()
+      if float_win and vim.api.nvim_win_is_valid(float_win) then
+        vim.api.nvim_win_hide(float_win)
+        float_win = nil
+      end
+    end,
+  })
+end
