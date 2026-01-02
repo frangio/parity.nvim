@@ -9,7 +9,7 @@ for i, name in ipairs(TAG_NAMES) do
   TAG[name] = i - 1
 end
 
-local DELIMITERS = { {"(", ")"}, {"[", "]"}, {"{", "}"} }
+local DELIMITERS = { ["("] = ")", ["["] = "]", ["{"] = "}" }
 
 local function alloc_id()
   local base = bit.lshift(next_id, TAG_BITS)
@@ -171,14 +171,18 @@ function parity_mark_space_r(base)
   })
 end
 
-function parity_adjust_space_l(base)
-  local row, col = current_pos()
-  local space_l_row, space_l_col = get_mark(base, TAG.SPACE_L)
-  if space_l_row == row and space_l_col == 0 then
-    vim.api.nvim_buf_set_extmark(0, ns, row, vim.fn.indent(row + 1), {
-      id = base + TAG.SPACE_L,
-      right_gravity = false,
-    })
+function parity_adjust_space_l()
+  local row = current_pos()
+  local marks = vim.api.nvim_buf_get_extmarks(0, ns, {row, 0}, {row, 0}, {})
+  for _, m in ipairs(marks) do
+    local id = m[1]
+    local tag = bit.band(id, TAG_MASK)
+    if tag == TAG.SPACE_L then
+      vim.api.nvim_buf_set_extmark(0, ns, row, vim.fn.indent(row + 1), {
+        id = id,
+        right_gravity = false,
+      })
+    end
   end
 end
 
@@ -232,12 +236,12 @@ vim.keymap.set('i', '<BS>', function()
           local distance = col - space_r_col
           return string.rep('<C-g>U<Left>', distance)
             .. '<Cmd>lua parity_insert_cr()<CR><C-F>'
-            .. string.format('<Cmd>lua parity_adjust_space_l(%d)<CR>', base)
+            .. '<Cmd>lua parity_adjust_space_l()<CR>'
             .. string.format('<Cmd>lua parity_mark_space_r(%d)<CR>', base)
         else
           local indent_size = vim.fn.indent(row + 1)
           return '<C-g>U<Left>0<C-D><BS><C-F>'
-            .. string.format('<Cmd>lua parity_adjust_space_l(%d)<CR>', base)
+            .. '<Cmd>lua parity_adjust_space_l()<CR>'
             .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
             .. string.format('<Cmd>lua parity_mark_space_r(%d)<CR>', base)
         end
@@ -279,11 +283,22 @@ vim.keymap.set('i', '<BS>', function()
       end
     end
   end
+  if col == vim.fn.indent(row + 1) then
+    return '0<C-D><BS><C-F><Cmd>lua parity_adjust_space_l()<CR>'
+  end
   return '<BS>'
 end, { expr = true })
 
-vim.api.nvim_create_autocmd({ "InsertEnter", "CursorMovedI" }, {
-  callback = draw_float,
+vim.api.nvim_create_autocmd("InsertEnter", {
+  callback = function()
+    local row, col = current_pos()
+    if col == 0 then return end
+    local chars = vim.api.nvim_buf_get_text(0, row, col - 1, row, col + 1, {})[1]
+    local expected_close = DELIMITERS[chars:sub(1, 1)]
+    if expected_close and chars:sub(2, 2) == expected_close then
+      parity_mark_pair()
+    end
+  end,
 })
 
 vim.api.nvim_create_autocmd("InsertLeave", {
