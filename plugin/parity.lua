@@ -11,7 +11,7 @@ local TAG = {
 local TAG_BITS = 2
 local TAG_MASK = 0b11
 
-local DELIMITERS = { ["("] = ")", ["["] = "]", ["{"] = "}" }
+local DELIMITERS = { "()", "[]", "{}" }
 
 local function alloc_id()
   local base = bit.lshift(next_id, TAG_BITS)
@@ -146,8 +146,10 @@ function parity_mark_pair()
   draw_float()
 end
 
-for open, close in pairs(DELIMITERS) do
-  vim.keymap.set('i', open, open .. close .. '<C-g>U<Left><Cmd>lua parity_mark_pair()<CR>')
+for _, pair in ipairs(DELIMITERS) do
+  assert(#pair == 2, "DELIMITERS must contain strings of length 2")
+  local open, close = pair:sub(1, 1), pair:sub(2, 2)
+  vim.keymap.set('i', open, pair .. '<C-g>U<Left><Cmd>lua parity_mark_pair()<CR>')
   vim.keymap.set('i', close, function()
     local row, col = current_pos()
     local base, tag = get_mark_right(row, col)
@@ -299,9 +301,11 @@ vim.api.nvim_create_autocmd("InsertEnter", {
     local row, col = current_pos()
     if col == 0 then return end
     local chars = vim.api.nvim_buf_get_text(0, row, col - 1, row, col + 1, {})[1]
-    local expected_close = DELIMITERS[chars:sub(1, 1)]
-    if expected_close and chars:sub(2, 2) == expected_close then
-      parity_mark_pair()
+    for _, pair in ipairs(DELIMITERS) do
+      if chars == pair then
+        parity_mark_pair()
+        break
+      end
     end
   end,
 })
