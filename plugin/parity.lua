@@ -2,13 +2,14 @@ local ns = vim.api.nvim_create_namespace("parity")
 local next_id = 1
 
 local TAG = {
-  OPEN  = 0b00,
-  CLOSE = 0b01,
-  EXIT  = 0b10,
-  SPACE = 0b11,
+  OPEN  = 0b0001,
+  CLOSE = 0b0010,
+  EXIT  = 0b0100,
+  SPACE = 0b1000,
 }
-local TAG_BITS = 2
-local TAG_MASK = 0b11
+local TAG_BITS = 4
+local TAG_MASK = 0b1111
+local TAGS_OPEN_CLOSE = bit.bor(TAG.OPEN, TAG.CLOSE)
 
 local DELIMITERS = { "()", "[]", "{}" }
 
@@ -67,30 +68,21 @@ local function get_mark(base, tag)
   return pos[1], pos[2]
 end
 
-local function get_mark_left(row, col)
-  local marks = vim.api.nvim_buf_get_extmarks(
-    0, ns, { row, col }, { row, col }, { limit = 2 }
-  )
+local function get_marks(row, col)
+  local marks = vim.api.nvim_buf_get_extmarks(0, ns, { row, col }, { row, col }, {})
+  local base = nil
+  local tags = 0
   for _, m in ipairs(marks) do
     local id = m[1]
-    local tag = bit.band(id, TAG_MASK)
-    if tag == TAG.OPEN or tag == TAG.EXIT or tag == TAG.SPACE then
-      return id - tag, tag
+    local b = id - bit.band(id, TAG_MASK)
+    if base == nil then
+      base = b
+    end
+    if base == b then
+      tags = bit.bor(tags, bit.band(id, TAG_MASK))
     end
   end
-end
-
-local function get_mark_right(row, col)
-  local marks = vim.api.nvim_buf_get_extmarks(
-    0, ns, { row, col }, { row, col }, { limit = 2 }
-  )
-  for _, m in ipairs(marks) do
-    local id = m[1]
-    local tag = bit.band(id, TAG_MASK)
-    if tag == TAG.CLOSE or tag == TAG.SPACE then
-      return id - tag, tag
-    end
-  end
+  return base, tags
 end
 
 function parity_mark_pair()
@@ -119,8 +111,8 @@ for _, pair in ipairs(DELIMITERS) do
   vim.keymap.set('i', open, pair .. '<C-g>U<Left><Cmd>lua parity_mark_pair()<CR>')
   vim.keymap.set('i', close, function()
     local row, col = current_pos()
-    local base, tag = get_mark_right(row, col)
-    if base and (tag == TAG.CLOSE or tag == TAG.SPACE) then
+    local base, tags = get_marks(row, col)
+    if base and bit.band(tags, bit.bor(TAG.CLOSE, TAG.SPACE)) ~= 0 then
       local exit_row, exit_col = get_mark(base, TAG.EXIT)
       if exit_row ~= row then
         if col == vim.fn.indent(row + 1) then
@@ -160,32 +152,26 @@ end
 
 vim.keymap.set('i', '<CR>', function()
   local row, col = current_pos()
-  local base, tag = get_mark_left(row, col)
-  if base and tag == TAG.OPEN then
-    local close_row, close_col = get_mark(base, TAG.CLOSE)
-    if close_row == row and close_col == col then
-      return string.format('<Cmd>lua parity_insert_cr()<CR><CR><Cmd>lua parity_mark_space(%d)<CR>', base)
-    end
+  local base, tags = get_marks(row, col)
+  if base and bit.band(tags, TAGS_OPEN_CLOSE) == TAGS_OPEN_CLOSE then
+    return string.format('<Cmd>lua parity_insert_cr()<CR><CR><Cmd>lua parity_mark_space(%d)<CR>', base)
   end
   return '<CR>'
 end, { expr = true })
 
 vim.keymap.set('i', '<Space>', function()
   local row, col = current_pos()
-  local base, tag = get_mark_left(row, col)
-  if base and tag == TAG.OPEN then
-    local close_row, close_col = get_mark(base, TAG.CLOSE)
-    if close_row == row and close_col == col then
-      return string.format('  <C-g>U<Left><Cmd>lua parity_mark_space(%d)<CR>', base)
-    end
+  local base, tags = get_marks(row, col)
+  if base and bit.band(tags, TAGS_OPEN_CLOSE) == TAGS_OPEN_CLOSE then
+    return string.format('  <C-g>U<Left><Cmd>lua parity_mark_space(%d)<CR>', base)
   end
   return ' '
 end, { expr = true })
 
 vim.keymap.set('i', '<Del>', function()
   local row, col = current_pos()
-  local base = get_mark_right(row, col)
-  if base then
+  local base, tags = get_marks(row, col)
+  if base and bit.band(tags, TAG.CLOSE) ~= 0 then
     vim.api.nvim_buf_del_extmark(0, ns, base + TAG.CLOSE)
   end
   return '<Del>'
@@ -193,9 +179,9 @@ end, { expr = true })
 
 vim.keymap.set('i', '<BS>', function()
   local row, col = current_pos()
-  local base, tag = get_mark_left(row, col)
+  local base, tags = get_marks(row, col)
   if base then
-    if tag == TAG.EXIT then
+    if bit.band(tags, TAG.EXIT) ~= 0 then
       -- at exit mark: move left into the parens (or spaces if present)
       local open_row, open_col = get_mark(base, TAG.OPEN)
       local space_row, space_col = get_mark(base, TAG.SPACE)
@@ -216,7 +202,7 @@ vim.keymap.set('i', '<BS>', function()
       local target_col = space_row and space_col or close_col
       local distance = (close_row ~= row) and 1 or (col - target_col)
       return string.rep('<C-g>U<Left>', distance)
-    elseif tag == TAG.SPACE then
+    elseif bit.band(tags, TAG.SPACE) ~= 0 then
       local open_row, open_col = get_mark(base, TAG.OPEN)
       if open_row == row - 1 and col == compute_indent(row) then
         -- delete matched spaces and marks
@@ -240,16 +226,12 @@ vim.keymap.set('i', '<BS>', function()
         end
         return result
       end
-    elseif tag == TAG.OPEN then
-      local close_row, close_col = get_mark(base, TAG.CLOSE)
-      if close_row == row and close_col == col then
-        -- open and close marks together: cursor is between matching delimiters
-        -- delete both delimiters and marks
-        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.OPEN)
-        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.CLOSE)
-        vim.api.nvim_buf_del_extmark(0, ns, base + TAG.EXIT)
-        return '<BS><Del>'
-      end
+    elseif bit.band(tags, TAGS_OPEN_CLOSE) == TAGS_OPEN_CLOSE then
+      vim.api.nvim_buf_del_extmark(0, ns, base + TAG.OPEN)
+      vim.api.nvim_buf_del_extmark(0, ns, base + TAG.CLOSE)
+      vim.api.nvim_buf_del_extmark(0, ns, base + TAG.EXIT)
+      vim.api.nvim_buf_del_extmark(0, ns, base + TAG.SPACE)
+      return '<BS><Del>'
     end
   end
   if col == compute_indent(row) then
