@@ -197,11 +197,12 @@ vim.keymap.set('i', '<BS>', function()
           .. string.format('<Cmd>lua parity_insert_cr(%d)<CR>', indent_size)
           .. string.format('<Cmd>lua parity_mark_space(%d)<CR>', base)
         end
+      else
+        local close_row, close_col = get_mark(base, TAG.CLOSE)
+        local target_col = space_row and space_col or close_col
+        local distance = (close_row ~= row) and 1 or (col - target_col)
+        return string.rep('<C-g>U<Left>', distance)
       end
-      local close_row, close_col = get_mark(base, TAG.CLOSE)
-      local target_col = space_row and space_col or close_col
-      local distance = (close_row ~= row) and 1 or (col - target_col)
-      return string.rep('<C-g>U<Left>', distance)
     elseif bit.band(tags, TAG.SPACE) ~= 0 then
       local open_row, open_col = get_mark(base, TAG.OPEN)
       if open_row == row - 1 and col == compute_indent(row) then
